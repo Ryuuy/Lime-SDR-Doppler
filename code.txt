@@ -1,0 +1,26 @@
+g++ Lime_SDR_Spectrum_Analyzer.cpp -o Lime_SDR_Spectrum_Analyzer -L/usr/lib/x86_64-linux-gnu /usr/lib/x86_64-linux-gnu/libLimeSuite.so.22.09-1 -lfftw3
+./Lime_SDR_Spectrum_Analyzer
+test yichuwenti
+valgrind ./Lime_SDR_Spectrum_Analyzer
+
+valgrind --leak-check=full --track-origins=yes ./Lime_SDR_Spectrum_Analyzer
+
+LimeUtil --find
+
+g++ getdata.cpp -o getdata -L/usr/lib/x86_64-linux-gnu /usr/lib/x86_64-linux-gnu/libLimeSuite.so.22.09-1 -lfftw3
+./getdata
+
+python3 readbin.py
+
+g++ datatxt.cpp -o datatxt -L/usr/lib/x86_64-linux-gnu /usr/lib/x86_64-linux-gnu/libLimeSuite.so.22.09-1 -lfftw3
+./datatxt
+
+
+signal generator using way
+
+1. open, push Mode setup button then ARB
+2.  the second button(select waveform), for the sin waveform
+3.(stop signal at first!) push Amplitude, dont forget - at first, then number, and push first button(dBm)
+4. push frequency, select number, and push giga or miga you want
+5. push mode setup again, check weather it is true.
+6. start

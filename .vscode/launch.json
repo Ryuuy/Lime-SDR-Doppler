@@ -1,0 +1,26 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug Lime SDR Spectrum Analyzer",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/Lime_SDR_Spectrum_Analyzer",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "externalConsole": true,
+            "MIMode": "gdb",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ],
+            "preLaunchTask": "build lime",
+            "miDebuggerPath": "/usr/bin/gdb"
+        }
+    ]
+}
