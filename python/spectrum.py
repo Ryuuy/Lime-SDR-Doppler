@@ -8,6 +8,58 @@ from tqdm import tqdm
 import os
 from matplotlib.animation import FFMpegWriter
 from matplotlib.animation import FuncAnimation
+from collections import Counter
+from collections import Counter
+
+def count_continuous_segments(arr):
+    """
+    统计数组中连续为 1 和连续为 0 的子数组长度及其出现次数。
+    在指定范围内过滤长度为 21、20、8 和 9 的段，打印过滤后的段位置。
+    
+    Args:
+        arr (list): 输入的二进制数组（0 和 1）。
+    
+    Returns:
+        tuple: 包含连续 1 和连续 0 子数组长度统计的两个数组。
+    """
+    n = len(arr)
+    ones_lengths = []
+    zeros_lengths = []
+    segments = []  # 保存段的起始位置和长度
+    current_count = 1
+
+    # 遍历数组统计连续段，仅处理指定范围
+    for i in range(1, n):  # 控制索引范围
+        if arr[i] == arr[i - 1]:
+            current_count += 1
+        else:
+            # 保存当前段的起始位置和长度
+            segments.append((i - current_count, current_count, arr[i - 1]))
+            if arr[i - 1] == 1:
+                ones_lengths.append(current_count)
+            else:
+                zeros_lengths.append(current_count)
+            current_count = 1
+
+    # 最后一段处理
+    segments.append((n - current_count, current_count, arr[n - 101]))
+
+    # 过滤掉指定长度的段
+    filtered_segments = [seg for seg in segments if seg[1] not in {21, 20, 8, 9}]
+    print(f"过滤后的段位置和长度: {[(start, length) for start, length, value in filtered_segments]}")
+
+    # 统计每个长度出现的次数
+    ones_count = Counter(ones_lengths)
+    zeros_count = Counter(zeros_lengths)
+
+    # 转换为数组表示
+    max_ones_length = max(ones_count.keys(), default=0)
+    max_zeros_length = max(zeros_count.keys(), default=0)
+    array_of_1 = [ones_count.get(i, 0) for i in range(max_ones_length + 1)]
+    array_of_0 = [zeros_count.get(i, 0) for i in range(max_zeros_length + 1)]
+
+    return array_of_1, array_of_0
+
 
 def process_files(folder_name):
     """
@@ -122,8 +174,6 @@ def process_files_fast(folder_name):
     )
 
     # 打印排序结果
-    for file in sorted_files:
-        print(file)
     
     return sorted_files
 def widerdiffertime(folder_name, FFT_Calibration, sampling_rate):
@@ -2359,6 +2409,85 @@ def CompareChanneldetailSpecificFreqPlot(Folder, Start_diff, resolution, samplin
     print(f"Complex plot saved to: {output_file_complex}")
     return channel_response_matrix, time_axis
 
+def readtxt_to_bin(foldername, output_filename="BothSignal.bin"):
+    """
+    从 BothSignal.txt 读取数字，并保存为二进制文件。
+    
+    Args:
+        foldername (str): 包含 BothSignal.txt 文件的文件夹路径。
+        output_filename (str): 输出二进制文件的文件名（默认是 BothSignal.bin）。
+    
+    Returns:
+        str: 二进制文件的完整路径。
+    """
+    # 定位 BothSignal.txt 文件路径
+    input_filepath = os.path.join(os.path.dirname(foldername), "BothSignal.txt")
+    output_filepath = os.path.join(os.path.dirname(foldername), output_filename)
+    
+    # 读取 BothSignal.txt 文件中的数字
+    with open(input_filepath, "r") as file:
+        numbers = [int(line.strip()) for line in file if line.strip().isdigit()]
+    
+    if not numbers:
+        raise ValueError("BothSignal.txt 文件中没有有效的数字！")
+    
+    # 根据最大值动态创建位图
+    max_value = max(numbers)
+    bitmap = np.zeros(max_value, dtype=np.uint8)
+    
+    for num in numbers:
+        bitmap[num - 1] = 1  # 数字 1 对应索引 0
+
+    # 保存位图为二进制文件
+    with open(output_filepath, "wb") as f:
+        f.write(bitmap)
+    
+    print(f"二进制文件已保存到: {output_filepath}")
+    return output_filepath
+
+def returnfirstsignalframe(arr):
+    """
+    返回数组中第一个值为 1 的位置。
+
+    Args:
+        arr (numpy.ndarray): 输入的数组。
+
+    Returns:
+        int: 第一个值为 1 的索引（从 1 开始）。如果没有值为 1，则返回 -1。
+    """
+    if not isinstance(arr, (list, np.ndarray)):
+        raise ValueError("输入必须是一个列表或 numpy 数组！")
+
+    # 找到第一个值为 1 的索引
+    for idx, value in enumerate(arr):
+        if value == 1:
+            return idx+1  # 索引从 1 开始
+
+    # 如果数组中没有 1，返回 -1
+    return -1
+
+def read_bin_to_array(foldername, input_filename="BothSignal.bin"):
+    """
+    从二进制文件读取内容并还原为位图数组。
+    
+    Args:
+        foldername (str): 包含 BothSignal.bin 文件的文件夹路径。
+        input_filename (str): 输入二进制文件的文件名（默认是 BothSignal.bin）。
+    
+    Returns:
+        list: 解码后的位图数组。
+    """
+    # 定位二进制文件路径
+    input_filepath = os.path.join(os.path.dirname(foldername), input_filename)
+    
+    # 读取二进制文件
+    with open(input_filepath, "rb") as f:
+        bitmap = np.frombuffer(f.read(), dtype=np.uint8)
+    
+    # 转换为列表
+    bitmap_list = bitmap.tolist()
+    return bitmap_list
+
 def longestframe(foldername):
     # 读取 BothSignal.txt 中的数字作为 filtered_frames
     with open(os.path.join(os.path.dirname(foldername), "BothSignal.txt"), "r") as file:
@@ -2593,7 +2722,7 @@ def plot_amplitude_and_phase(channel_matrix, time, amplitude_file, phase_file):
     plt.close()
     print(f"Phase plot saved to {phase_file}")
 def combine_selected_signals(Folder, time_frame):
-    rx_sorted_files, rx_center_freqs, rx_frame_length, rx_frequency_frame_groups = process_files(Folder)
+    rx_sorted_files= process_files_fast(Folder)
     # 初始化复数信号
     combined_signal = np.array([], dtype=np.complex64)
     # 遍历每个指定的帧号，拼接信号
@@ -2661,6 +2790,159 @@ def find_signal_delay(complex_signal, long_signal, plot_file=None):
     # Return best match index and maximum correlation value
     return best_match_index, max_correlation
 
+def optimize_selection(arr, max_zeros=200):
+    """
+    优化选择数组中尽可能多的 1，同时确保 0 的数量不超过 max_zeros。
+    
+    Args:
+        arr (list): 输入数组，元素为 0 或 1。
+        max_zeros (int): 允许的最大 0 的数量。
+    
+    Returns:
+        dict: 包含最佳 z, x, y 的结果，以及选取的 1 和 0 的数量。
+    """
+    best_z, best_x, best_y = 0, 0, 0
+    max_ones = 0
+    best_zero_count = 0
+    
+    n = len(arr)
+    
+    # 遍历可能的 z, x, y 组合
+    for z in range(20):
+        for x in range(1, 20):  # 步长至少为 1
+            for y in range(1, 30):  # y 不能超过剩余长度
+                ones_count = 0
+                zeros_count = 0
+                
+                # 从 z 开始，每间隔 x 个位置，选取连续 y 个元素
+                for start in range(z, n, x):
+                    segment = arr[start:start + y]
+                    ones_count += segment.count(1)
+                    zeros_count += segment.count(0)
+                    
+                    # 提前停止计算，如果 0 的数量超出限制
+                    if zeros_count > max_zeros:
+                        break
+                
+                # 更新最佳结果
+                if zeros_count <= max_zeros and ones_count > max_ones:
+                    best_z, best_x, best_y = z, x, y
+                    max_ones = ones_count
+                    best_zero_count = zeros_count
+    
+    return {
+        "z": best_z,
+        "x": best_x,
+        "y": best_y,
+        "ones_count": max_ones,
+        "zeros_count": best_zero_count,
+    }
+
+def timedomainpic(folder, frame):
+    # 读取二进制文件路径 (假设您有 `process_files_fast` 和 `read_bin_file` 函数)
+    bin_file_path = process_files_fast(folder)[frame]
+    I_data, Q_data = read_bin_file(bin_file_path)
+    print(I_data)
+    print(Q_data)
+    I_data = I_data.astype(np.float32)
+    Q_data = Q_data.astype(np.float32)
+    # 计算能量
+    Energy = I_data**2 + Q_data**2
+
+    # 绘图
+    plt.figure(figsize=(10, 6))
+    plt.plot(Energy, label="Energy", color="blue")
+    plt.xlabel("Data Points")
+    plt.ylabel("Energy")
+    plt.title("Energy vs. Data Points")
+    plt.legend()
+    plt.grid(True)
+    plt.show()
+
+def save_bin_file(file_path, data):
+    """
+    将复数信号数据保存到二进制文件中，存储为 int16 类型。
+    """
+    # 确保数据为 int16 类型
+    interleaved_data = np.empty((data.size * 2,), dtype=np.int16)
+    interleaved_data[0::2] = np.round(data.real).astype(np.int16)  # 保存实部
+    interleaved_data[1::2] = np.round(data.imag).astype(np.int16)  # 保存虚部
+
+    # 保存到文件
+    with open(file_path, "wb") as f:
+        interleaved_data.tofile(f)
+
+def create_new_signal_Folder(Folder, firstframe, newfoldername):
+    # 设置路径
+    TxFolder = os.path.join(Folder, "Channel0")  # 不变的
+    RxFolder = os.path.join(Folder, "Channel1")  # 人动的
+    rx_sorted_files = process_files_fast(RxFolder)
+    tx_sorted_files = process_files_fast(TxFolder)
+
+    # 初始化
+    lengthRxnow = 0
+    TxsaveCounter = 0
+    RxsaveCounter = 0
+    TotleSignallength = 15000  # 总信号长度动态更新
+    combined_signal_rx = np.array([], dtype=np.complex64)
+    combined_signal_tx = np.array([], dtype=np.complex64)
+
+    # 创建输出文件夹
+    if not os.path.exists(newfoldername):
+        os.makedirs(newfoldername)
+
+    Rxfoldernewname = os.path.join(newfoldername, "Channel1")
+    Txfoldernewname = os.path.join(newfoldername, "Channel0")
+
+    if not os.path.exists(Rxfoldernewname):
+        os.makedirs(Rxfoldernewname)
+    if not os.path.exists(Txfoldernewname):
+        os.makedirs(Txfoldernewname)
+
+    # 遍历每个指定的帧号，拼接信号
+    for rx_file_path, tx_file_path in zip(rx_sorted_files[firstframe:], tx_sorted_files[firstframe:]):
+        # 读取当前帧的 I 和 Q 数据
+        rx_I_data, rx_Q_data = read_bin_file(rx_file_path)
+        tx_I_data, tx_Q_data = read_bin_file(tx_file_path)
+
+        lengthRxnow += 512
+
+        # 将 I 和 Q 数据转换为复数信号
+        rx_complex_signal_frame = rx_I_data + 1j * rx_Q_data
+        tx_complex_signal_frame = tx_I_data + 1j * tx_Q_data
+
+        # 拼接当前帧信号到总信号
+        combined_signal_rx = np.concatenate((combined_signal_rx, rx_complex_signal_frame))
+        combined_signal_tx = np.concatenate((combined_signal_tx, tx_complex_signal_frame))
+
+        # 如果总长度达到或超过 15000
+        if lengthRxnow >= TotleSignallength:
+            # 更新保存计数器
+            RxsaveCounter += 1
+            TxsaveCounter += 1
+            TotleSignallength = int(14999.7367 * RxsaveCounter)
+
+            # 提取前 10240 个数据并保存
+            rx_save = combined_signal_rx[:10240]
+            tx_save = combined_signal_tx[:10240]
+
+            # 更新 combined_signal，移除前 TotleSignallength 个复数数据
+            combined_signal_rx = combined_signal_rx[TotleSignallength:]
+            combined_signal_tx = combined_signal_tx[TotleSignallength:]
+
+            # 保存到新文件夹
+            rx_save_file_name = os.path.join(
+                Rxfoldernewname, f"center900frame{RxsaveCounter}.bin"
+            )
+            tx_save_file_name = os.path.join(
+                Txfoldernewname, f"center900frame{TxsaveCounter}.bin"
+            )
+
+            save_bin_file(rx_save_file_name, rx_save)
+            save_bin_file(tx_save_file_name, tx_save)
+
+    print(f"数据处理完成，新文件已保存到文件夹: {newfoldername}")
+
 if __name__ == "__main__":
     # 参数设置
 
@@ -2708,13 +2990,62 @@ if __name__ == "__main__":
     # CompareChannel(folder_name2, folder_name, [-0.492472 + -0.492484*1,-0.492472 + -0.492484*1], sampling_rate)  
 
     # Signal = longestframe("./data/wifi2445stable/")
+    #folder_name = "./data/nohumananother2501Ghz/"
+    #readtxt_to_bin(folder_name)
+    #arr = read_bin_to_array(folder_name)
+
+    #print(count_continuous_segments(arr))
+    newfoldername = "./data/fastwalkSignal/"
+    folder_name = "./data/fastwalk2501Ghz/"
+    arr = read_bin_to_array(folder_name)
+    firstframe = returnfirstsignalframe(arr)
+    create_new_signal_Folder(folder_name,firstframe,newfoldername)
+    #timedomainpic("./data/fourHumannoMove2501Ghz/Channel0/",31)
+
+    newfoldername = "./data/fourHumanSignal/"
+    folder_name = "./data/fourHumannoMove2501Ghz/"
+    arr = read_bin_to_array(folder_name)
+    firstframe = returnfirstsignalframe(arr)
+    create_new_signal_Folder(folder_name,firstframe,newfoldername)
+
+    newfoldername = "./data/handmovingSignal/"
+    folder_name = "./data/handmoving2501Ghz/"
+    arr = read_bin_to_array(folder_name)
+    firstframe = returnfirstsignalframe(arr)
+    create_new_signal_Folder(folder_name,firstframe,newfoldername)
+
+    newfoldername = "./data/breathSignal/"
+    folder_name = "./data/breath2501Ghz/"
+    arr = read_bin_to_array(folder_name)
+    firstframe = returnfirstsignalframe(arr)
+    create_new_signal_Folder(folder_name,firstframe,newfoldername)
+
+    # folder_name = "./data/fourHumannoMove2501Ghz/"
+    # #timedomainpic(folder_name,)
+    # arr = read_bin_to_array(folder_name)
+    # count_continuous_segments(arr)
+    # timedomainpic("./data/fourHumannoMove2501Ghz/Channel0",returnfirstsignalframe(arr)+19)
+    
+
+    # folder_name = "./data/handmoving2501Ghz/"
+    # arr = read_bin_to_array(folder_name)
+    # timedomainpic("./data/handmoving2501Ghz/Channel0",returnfirstsignalframe(arr)+19)
+
+    # print(count_continuous_segments(arr))
+    # folder_name = "./data/breath2501Ghz/"
+    # arr = read_bin_to_array(folder_name)
+    # print(returnfirstsignalframe(arr))
+    # timedomainpic("./data/breath2501Ghz/Channel0",returnfirstsignalframe(arr)+19)
+    # print(count_continuous_segments(arr))
+
+
+    # timedomainpic("./data/fastwalk2501Ghz/Channel0",returnfirstsignalframe(arr)+19)
     
 
 
-    folder_name = "./data/fastwalk2501Ghz/"
-    time_frame = list(range(1, 200))
-    combinedsignalstable = combine_selected_signals("./data/fastwalk2501Ghz/Channel1",time_frame)
-    STFT(combinedsignalstable, Start_point, Start_diff, len(combinedsignalstable), sampling_rate, resolution)
+    #time_frame = list(range(1, 200))
+    #combinedsignalstable = combine_selected_signals("./data/fastwalk2501Ghz/Channel1",time_frame)
+    #STFT(combinedsignalstable, Start_point, Start_diff, len(combinedsignalstable), sampling_rate, resolution)
     #combinedsignalhumanmove = combine_selected_signals("./data/fastwalk2501Ghz/Channel1",[1:200])#人动变量
     #print(find_signal_delay(combinedsignalstable,combinedsignalhumanmove))
     
@@ -2736,7 +3067,7 @@ if __name__ == "__main__":
     # folder_name = "./data/nohumananother2501Ghz/"
     # Signal = readFilter(folder_name)
 
-    CompareChannel(folder_name,[-0.492472 + -0.492484*1,-0.492472 + -0.492484*1], sampling_rate,signalfilter=True,avgminus=True)
+    #CompareChannel(folder_name,[-0.492472 + -0.492484*1,-0.492472 + -0.492484*1], sampling_rate,signalfilter=True,avgminus=True)
 
     # channel_matrix,time = CompareChannelAvgFreq(folder_name,[-0.492472 + -0.492484*1,-0.492472 + -0.492484*1], sampling_rate,signalfilter=True)
     
