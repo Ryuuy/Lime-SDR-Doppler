@@ -3239,16 +3239,16 @@ if __name__ == "__main__":
     #arr = read_bin_to_array(folder_name)
 
     #print(count_continuous_segments(arr))
-    newfoldername = "./data/handmovingSignal/"
-    folder_name = "./data/handmoving2501Ghz/"
+    newfoldername = "./data/fourHumannoMoveSignal/"
+    folder_name = "./data/fourHumannoMove2501Ghz/"
     arr = read_bin_to_array(folder_name)
     firstframe = returnfirstsignalframe(arr)
-    #create_new_signal_Folder(folder_name,firstframe,newfoldername)
-    #channel_response_matrix, freq_axis, time_axis = CompareChannelOld(newfoldername,[-0.492472 + -0.492484*1,-0.492472 + -0.492484*1], sampling_rate,signalfilter=False,avgminus=False)
+    create_new_signal_Folder(folder_name,firstframe,newfoldername)
+    channel_response_matrix, freq_axis, time_axis = CompareChannelOld(newfoldername,[-0.492472 + -0.492484*1,-0.492472 + -0.492484*1], sampling_rate,signalfilter=False,avgminus=False)
     #create_new_signal_Folder(folder_name,firstframe,newfoldername)
     #timedomainpic("./data/fastwalkSignal/Channel1/",1600)
     #timedomainpic("./data/fastwalkSignal/Channel0/",1600)
-    selected_frequency = 2e6  # 目标频率 (Hz)
+    #selected_frequency = 2e6  # 目标频率 (Hz)
     combinedsignalstable, time_axis = CompareChannelAvgFreq(newfoldername,[0,0], sampling_rate)
 # 提取目标频率的复数响应
     #combinedsignalstable = extract_frequency_response(channel_response_matrix, freq_axis, selected_frequency)
@@ -3284,7 +3284,7 @@ if __name__ == "__main__":
     # plt.show()
     Start_point = 0
     Start_diff = 1
-    resolution = 500 #0.2s
+    resolution = 500 #0.5s
     sampling_rate = 1e3 #0.001s
     combinedsignalstable = Channel_Cali(combinedsignalstable)
     STFT(combinedsignalstable, Start_point, Start_diff, len(combinedsignalstable), sampling_rate, resolution,Gaussian=True,interpolation_factor=4, freq_range=(-500, 500))
