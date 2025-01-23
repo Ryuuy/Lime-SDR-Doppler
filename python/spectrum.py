@@ -3,12 +3,10 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.fft import fft, fftshift
-from scipy.signal import windows,stft
+from scipy.signal import windows,stft,gaussian
 from tqdm import tqdm
 import os
-from matplotlib.animation import FFMpegWriter
-from matplotlib.animation import FuncAnimation
-from collections import Counter
+from matplotlib.animation import FFMpegWriter,FuncAnimation
 from collections import Counter
 
 def count_continuous_segments(arr):
@@ -507,7 +505,7 @@ def process_bin_files_to_video(folder_name, frame_rate, sampling_rate, max_frame
 
 
 
-def STFT(complex_signal, Start_point, Start_diff, Final_point, sample_rate, resolution):
+def STFT(complex_signal, Start_point, Start_diff, Final_point, sample_rate, resolution, Gaussian=False, interpolation_factor=1, freq_range=(-500, 500)):
     """
     Perform Short-Time Fourier Transform (STFT) on a complex signal.
 
@@ -518,6 +516,9 @@ def STFT(complex_signal, Start_point, Start_diff, Final_point, sample_rate, reso
     - Final_point: int, end point of the signal analysis
     - sample_rate: float, sampling rate of the signal
     - resolution: int, size of each window for FFT
+    - Gaussian: bool, whether to apply a Gaussian window in the time domain
+    - interpolation_factor: int, factor to interpolate the frequency spectrum for smoothness
+    - freq_range: tuple, frequency range to display (min_freq, max_freq)
 
     Returns:
     - dbm_results: list of dBm values for each window
@@ -532,9 +533,14 @@ def STFT(complex_signal, Start_point, Start_diff, Final_point, sample_rate, reso
     dbm_results = []
     time_axis = []  # To track time points
 
+    # Generate Gaussian window if needed
+    if Gaussian:
+        std_dev = resolution / 4  # Standard deviation (adjustable, typically resolution/8)
+        gaussian_window = gaussian(resolution, std=std_dev)
+        gaussian_window /= np.max(gaussian_window)
+
     # Iteratively process each window
-    i = 0
-    while True:
+    for i in range(len(complex_signal)):
         start_idx = Start_point + i * Start_diff
         end_idx = start_idx + resolution
 
@@ -543,10 +549,14 @@ def STFT(complex_signal, Start_point, Start_diff, Final_point, sample_rate, reso
             break
 
         # Extract the current window
-        window_signal = complex_signal[start_idx:end_idx]
+        window_signal = complex_signal[start_idx:end_idx].copy()
 
-        # Perform FFT and FFTShift
-        fft_result = fft(window_signal)
+        # Apply Gaussian window in time domain if enabled
+        if Gaussian:
+            window_signal *= gaussian_window
+
+        # Perform FFT
+        fft_result = fft(window_signal, n=resolution * interpolation_factor)  # Interpolated FFT
         fft_result = fftshift(fft_result)
         fft_magnitude = np.abs(fft_result)
 
@@ -558,18 +568,25 @@ def STFT(complex_signal, Start_point, Start_diff, Final_point, sample_rate, reso
         time_point = start_idx / sample_rate
         time_axis.append(time_point)
 
-        # Move to the next window
-        i += 1
-
-    # Plot results
+    # Normalize dBm_results to the longest window length (for consistent plotting)
     max_length = max(len(dbm) for dbm in dbm_results)
     dbm_results_padded = [np.pad(dbm, (0, max_length - len(dbm)), constant_values=np.nan) for dbm in dbm_results]
+
+    # Generate frequency axis
+    interpolated_sample_rate = sample_rate * interpolation_factor
+    freq_axis = np.linspace(-interpolated_sample_rate / 2, interpolated_sample_rate / 2, resolution * interpolation_factor, endpoint=False)
+
+    # Apply frequency range filtering
+    min_freq, max_freq = freq_range
+    freq_mask = (freq_axis >= min_freq) & (freq_axis <= max_freq)
+    freq_axis_filtered = freq_axis[freq_mask]
+    dbm_results_filtered = [dbm[freq_mask] for dbm in dbm_results_padded]
 
     # Plot results
     plt.figure(figsize=(10, 6))
     plt.imshow(
-        np.array(dbm_results_padded).T,  # Transpose for correct orientation
-        extent=[time_axis[0], time_axis[-1], -sample_rate/2, sample_rate/2],
+        np.array(dbm_results_filtered).T,  # Transpose for correct orientation
+        extent=[time_axis[0], time_axis[-1], min_freq, max_freq],
         aspect='auto',
         origin='lower',
         cmap='jet'
@@ -577,9 +594,10 @@ def STFT(complex_signal, Start_point, Start_diff, Final_point, sample_rate, reso
     plt.colorbar(label='Power (dBm)')
     plt.xlabel('Time (s)')
     plt.ylabel('Frequency (Hz)')
-    plt.title('Short-Time Fourier Transform (STFT)')
+    plt.title('Short-Time Fourier Transform (STFT)' + (' with Gaussian Window' if Gaussian else ''))
     plt.grid()
     plt.show()
+
     return dbm_results
 
 def CalculateDoppler(real_signal, Start_point, Start_diff, Final_point, sample_rate, resolution):
@@ -932,6 +950,7 @@ def widerdiffertimetry(folder_name, FFT_Calibration, sampling_rate):
     plot_3d_dbm(dbm_matrix, frame_length * frequency_frame_groups[0], time_axis, len(cropped_freq_axes[0]), np.concatenate(cropped_freq_axes)[::-1], output_file)
 
     return dbm_matrix, cropped_freq_axes, time_axis
+
 def maxsignalpricise(complex_signal, Start_number, Finish_number, peaknumber, Output):
     """
     Analyzes a specified segment of a complex signal, computes its DFT, and extracts peak information.
@@ -1632,7 +1651,7 @@ def CompareChannelOld(Folder, DC_Calibration, sampling_rate, signalfilter=False,
     # 初始化存储信道响应的矩阵
     total_frames = rx_frame_length * rx_frequency_frame_groups[0]
     num_freq_bands = len(rx_center_freqs)
-    channel_response_matrix = np.zeros((total_frames, num_freq_bands, FFTLength), dtype=complex)
+    channel_response_matrix = np.zeros((total_frames, 1, FFTLength), dtype=complex)
 
     # 遍历每个中心频率和时间帧，计算信道响应
     index = 0
@@ -1801,33 +1820,31 @@ def CompareChannelAvgFreq(Folder, DC_Calibration, sampling_rate, signalfilter=Fa
     channel_response_matrix = []
     valid_frames = []
 
-    with open(os.path.join(os.path.dirname(RxFolder), "BothSignal.txt"), "r") as file:
-        filtered_frames = [int(line.strip()) for line in file if line.strip().isdigit()]
 
     for k, center_freq in enumerate(rx_center_freqs):
         for frame in range(rx_frame_length * rx_frequency_frame_groups[k]):
-            if frame in filtered_frames:
-                rx_file_path = rx_sorted_files[frame]
-                tx_file_path = tx_sorted_files[frame]
-                rx_I_data, rx_Q_data = read_bin_file(rx_file_path)
-                tx_I_data, tx_Q_data = read_bin_file(tx_file_path)
+            
+            rx_file_path = rx_sorted_files[frame]
+            tx_file_path = tx_sorted_files[frame]
+            rx_I_data, rx_Q_data = read_bin_file(rx_file_path)
+            tx_I_data, tx_Q_data = read_bin_file(tx_file_path)
 
-                # 计算复数形式的 Rx 和 Tx 信号
-                rx_complex_signal = rx_I_data + 1j * rx_Q_data
-                tx_complex_signal = tx_I_data + 1j * tx_Q_data
+            # 计算复数形式的 Rx 和 Tx 信号
+            rx_complex_signal = rx_I_data + 1j * rx_Q_data
+            tx_complex_signal = tx_I_data + 1j * tx_Q_data
 
-                # 进行 FFT 并应用校准
-                rx_fft_result = fftshift(fft(rx_complex_signal))
-                tx_fft_result = fftshift(fft(tx_complex_signal))
+            # 进行 FFT 并应用校准
+            rx_fft_result = fftshift(fft(rx_complex_signal))
+            tx_fft_result = fftshift(fft(tx_complex_signal))
 
-                if DC_Calibration[k] != 0:
-                    rx_fft_result[0] = rx_fft_result[0] - DC_Calibration[0] * FFTLength
-                    tx_fft_result[0] = tx_fft_result[0] - DC_Calibration[1] * FFTLength
+            if DC_Calibration[k] != 0:
+                rx_fft_result[0] = rx_fft_result[0] - DC_Calibration[0] * FFTLength
+                tx_fft_result[0] = tx_fft_result[0] - DC_Calibration[1] * FFTLength
 
-                # 计算信道响应
-                channel_response = rx_fft_result / tx_fft_result
-                channel_response_matrix.append(np.mean(channel_response))
-                valid_frames.append(frame)
+            # 计算信道响应
+            channel_response = rx_fft_result / tx_fft_result
+            channel_response_matrix.append(np.mean(channel_response))
+            valid_frames.append(frame)
 
     print(f"All frames processed for {len(rx_center_freqs)} frequency bands.")
 
@@ -1887,7 +1904,7 @@ def plot_3d_angle(angle_matrix, FrameNumber, time_axis, FFTLength, freq_axis, ou
     # 绘制 3D 角度图像
     plt.figure(figsize=(10, 6))  # 调整图像尺寸
     plt.imshow(
-        angle_matrix_expanded, aspect='auto', cmap='plasma', vmin=-np.pi, vmax=np.pi,
+        angle_matrix_expanded, aspect='auto', cmap='plasma', vmin=-0.3*np.pi, vmax=0.3*np.pi,
         extent=[time_axis[0], time_axis[-1], freq_axis[0], freq_axis[-1]]
     )
     plt.colorbar(label='Angle (radians)', pad=0.02, shrink=0.8)  # 调整颜色条的位置和大小
@@ -2525,6 +2542,110 @@ def CompareChanneldetailSpecificFreqPlot(Folder, Start_diff, resolution, samplin
     print(f"Phase plot saved to: {output_file_phase}")
     print(f"Complex plot saved to: {output_file_complex}")
     return channel_response_matrix, time_axis
+def extract_frequency_response(channel_response_matrix, freq_axis, selected_frequency):
+    """
+    Extract the complex response of a specific frequency across all time frames.
+
+    Parameters:
+    - channel_response_matrix: ndarray, the channel response matrix (time x freq)
+    - freq_axis: ndarray, the frequency axis corresponding to FFTLength
+    - selected_frequency: float, the target frequency to extract
+
+    Returns:
+    - frequency_response: ndarray, complex response of the selected frequency over time
+    """
+    # 检查频率范围
+    if selected_frequency < freq_axis.min() or selected_frequency > freq_axis.max():
+        raise ValueError(f"Selected frequency {selected_frequency} Hz is out of range [{freq_axis.min()}, {freq_axis.max()}] Hz.")
+    
+    # 找到目标频率的索引
+    selected_index = np.argmin(np.abs(freq_axis - selected_frequency))
+    print(f"Selected frequency index: {selected_index}")
+
+    # 提取目标频率的复数响应
+    frequency_response = channel_response_matrix[:, 0, selected_index]  # 第二维 num_freq_bands 是 1
+    return frequency_response
+
+def ChannelSpecificFreq(Folder, sampling_rate, selected_frequency):
+    """
+    针对某一频率，对 Rx 和 Tx 文件夹中的每一帧信号计算信道响应并绘制散点图。
+    
+    Args:
+        Folder (str): 数据文件夹路径
+        sampling_rate (float): 采样率 (Hz)
+        selected_frequency (float): 目标频率 (Hz)
+    """
+
+    # 获取 Tx 和 Rx 文件夹路径
+    TxFolder = os.path.join(Folder, "Channel0")
+    RxFolder = os.path.join(Folder, "Channel1")
+    
+    # 处理 Rx 和 Tx 文件夹中的文件
+    rx_sorted_files, rx_center_freqs, rx_frame_length, rx_frequency_frame_groups = process_files(RxFolder)
+    tx_sorted_files, tx_center_freqs, tx_frame_length, tx_frequency_frame_groups = process_files(TxFolder)
+    with open(rx_sorted_files[0], "rb") as f:
+        total_data = np.fromfile(f, dtype=np.int16)
+        total_data_count = len(total_data)
+
+    FFTLength = total_data_count // 2  # 每个时间帧的 FFT 长度
+    print("FFTLeng",FFTLength)
+    # 构建频率轴并验证所选频率
+    freq_axis = np.fft.fftfreq(FFTLength, d=1 / sampling_rate)
+    if selected_frequency < freq_axis.min() or selected_frequency > freq_axis.max():
+        raise ValueError(f"Selected frequency {selected_frequency} Hz is out of range [{freq_axis.min()}, {freq_axis.max()}] Hz.")
+    
+    # 找到目标频率对应的频率轴索引
+    selected_index = np.argmin(np.abs(freq_axis - selected_frequency))
+    print(f"Selected frequency index: {selected_index}")
+
+    # 计算 DFT 权重 (eterm)
+    n = np.arange(FFTLength)  # 时域采样点索引
+    e_term = np.exp(-1j * 2 * np.pi * selected_index * n / FFTLength)  # DFT 权值
+
+    # 初始化复数结果列表
+    channel_responses = []
+
+    # 遍历文件夹中的每一帧数据
+    for rx_file_path, tx_file_path in zip(rx_sorted_files, tx_sorted_files):
+        # 读取 Rx 和 Tx 数据
+        rx_I_data, rx_Q_data = read_bin_file(rx_file_path)
+        tx_I_data, tx_Q_data = read_bin_file(tx_file_path)
+        
+        # 组合成复数信号
+        rx_complex_signal = rx_I_data + 1j * rx_Q_data
+        tx_complex_signal = tx_I_data + 1j * tx_Q_data
+
+        # 检查数据长度是否一致
+        if len(rx_complex_signal) != len(tx_complex_signal):
+            print(f"Skipping file pair {rx_file_path} and {tx_file_path}: Rx and Tx data lengths do not match.")
+            continue
+
+        # 使用 DFT 权值计算目标频率的信号
+        rx_fft_result = np.sum(rx_complex_signal * e_term)
+        tx_fft_result = np.sum(tx_complex_signal * e_term)
+
+        # 计算信道响应
+        if tx_fft_result != 0:  # 避免除零
+            channel_response = rx_fft_result / tx_fft_result
+            channel_responses.append(channel_response)
+        else:
+            print(f"Skipping file pair {rx_file_path} and {tx_file_path}: Tx FFT result is zero.")
+            continue
+
+    # 转换为 NumPy 数组
+    channel_responses = np.array(channel_responses)
+    print(len(channel_responses))
+    # 绘制复数信道响应的散点图
+    plt.figure(figsize=(6, 6))
+    plt.scatter(channel_responses.real, channel_responses.imag, s=5, label=f"Frequency: {selected_frequency/1e6:.2f} MHz")
+    plt.title(f"Complex Response Scatter Plot at {selected_frequency / 1e6:.2f} MHz")
+    plt.xlabel("Real Part")
+    plt.ylabel("Imaginary Part")
+    plt.grid()
+    plt.gca().set_aspect('equal', adjustable='box')  # 确保比例一致
+    plt.legend()
+    plt.show()
+    return channel_responses
 
 def readtxt_to_bin(foldername, output_filename="BothSignal.bin"):
     """
@@ -2791,7 +2912,7 @@ def load_channel_data(file_path):
     print(f"Data loaded from {file_path}")
     return channel_matrix, time
 
-def Channel_Cali(channel_matrix, time):
+def Channel_Cali(channel_matrix):
     """
     将 channel_matrix 中心化，使其中心坐标为 0
     Args:
@@ -2803,7 +2924,7 @@ def Channel_Cali(channel_matrix, time):
     """
     mean_value = np.mean(channel_matrix)
     channel_matrix -= mean_value  # 中心化复数数组
-    return channel_matrix, time
+    return channel_matrix
 def plot_amplitude_and_phase(channel_matrix, time, amplitude_file, phase_file):
     """
     绘制信道响应的振幅和相位随时间变化
@@ -3118,14 +3239,55 @@ if __name__ == "__main__":
     #arr = read_bin_to_array(folder_name)
 
     #print(count_continuous_segments(arr))
-    newfoldername = "./data/fastwalkSignal/"
-    folder_name = "./data/fastwalk2501Ghz/"
+    newfoldername = "./data/handmovingSignal/"
+    folder_name = "./data/handmoving2501Ghz/"
     arr = read_bin_to_array(folder_name)
     firstframe = returnfirstsignalframe(arr)
-    CompareChannel(newfoldername,[-0.492472 + -0.492484*1,-0.492472 + -0.492484*1], sampling_rate,avgminus=True)
     #create_new_signal_Folder(folder_name,firstframe,newfoldername)
+    #channel_response_matrix, freq_axis, time_axis = CompareChannelOld(newfoldername,[-0.492472 + -0.492484*1,-0.492472 + -0.492484*1], sampling_rate,signalfilter=False,avgminus=False)
+    #create_new_signal_Folder(folder_name,firstframe,newfoldername)
+    #timedomainpic("./data/fastwalkSignal/Channel1/",1600)
+    #timedomainpic("./data/fastwalkSignal/Channel0/",1600)
+    selected_frequency = 2e6  # 目标频率 (Hz)
+    combinedsignalstable, time_axis = CompareChannelAvgFreq(newfoldername,[0,0], sampling_rate)
+# 提取目标频率的复数响应
+    #combinedsignalstable = extract_frequency_response(channel_response_matrix, freq_axis, selected_frequency)
+    # amplitude = np.angle(combinedsignalstable)
 
+    # # 创建横轴
+    # x_axis = np.arange(len(combinedsignalstable))
 
+    # 绘制振幅
+    # plt.figure(figsize=(10, 6))
+    # plt.plot(x_axis, amplitude, label="Amplitude", color="blue")
+    # plt.title("Amplitude of Combined Signal")
+    # plt.xlabel("Index")
+    # plt.ylabel("Amplitude")
+    # plt.grid()
+    # plt.legend()
+    # plt.show()
+    #combinedsignalstable = ChannelSpecificFreq(newfoldername,sampling_rate,2e6)
+    
+    # amplitude = np.abs(combinedsignalstable)
+
+    # # 创建横轴
+    # x_axis = np.arange(len(combinedsignalstable))
+
+    # # 绘制振幅
+    # plt.figure(figsize=(10, 6))
+    # plt.plot(x_axis, amplitude, label="Amplitude", color="blue")
+    # plt.title("Amplitude of Combined Signal")
+    # plt.xlabel("Index")
+    # plt.ylabel("Amplitude")
+    # plt.grid()
+    # plt.legend()
+    # plt.show()
+    Start_point = 0
+    Start_diff = 1
+    resolution = 500 #0.2s
+    sampling_rate = 1e3 #0.001s
+    combinedsignalstable = Channel_Cali(combinedsignalstable)
+    STFT(combinedsignalstable, Start_point, Start_diff, len(combinedsignalstable), sampling_rate, resolution,Gaussian=True,interpolation_factor=4, freq_range=(-500, 500))
     #timedomainpic("./data/fourHumannoMove2501Ghz/Channel0/",31)
 
     # newfoldername = "./data/fourHumanSignal/"
