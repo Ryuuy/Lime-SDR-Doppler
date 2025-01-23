@@ -1482,7 +1482,121 @@ def TimedomainFreqoffset(folder_name, Start_point, Start_diff, Final_point, samp
 
     return frequency_offsets, variances
 
-def CompareChannel(Folder, DC_Calibration, sampling_rate, signalfilter=False,avgminus=False):
+def CompareChannel(Folder, DC_Calibration, sampling_rate, avgminus=False):
+    """
+    Compare the channel response by dividing the spectra from RxFolder and TxFolder.
+
+    Parameters:
+    - RxFolder: str, path to the folder containing Rx data.
+    - TxFolder: str, path to the folder containing Tx data.
+    - DC_Calibration: list, DC calibration values for each frequency band.
+    - sampling_rate: float, sampling rate of the signal.
+    - FFTLength: int, FFT length.
+
+    Returns:
+    - channel_response_matrix: ndarray, complex channel response for all frames and bands.
+    - time_axis: ndarray, time axis for the frames.
+    - freq_axis: ndarray, frequency axis for the FFT.
+    """
+    TxFolder = os.path.join(Folder,"Channel0")#不变的
+    RxFolder = os.path.join(Folder,"Channel1")#人动的
+    rx_sorted_files, rx_center_freqs, rx_frame_length, rx_frequency_frame_groups = process_files(RxFolder)
+    tx_sorted_files, tx_center_freqs, tx_frame_length, tx_frequency_frame_groups = process_files(TxFolder)
+    with open(rx_sorted_files[0], "rb") as f:
+        total_data = np.fromfile(f, dtype=np.int16)
+        total_data_count = len(total_data)
+
+    FFTLength = total_data_count // 2  # 每个时间帧的 FFT 长度
+    print(total_data_count)
+    # 确保 Rx 和 Tx 文件结构一致
+    if len(rx_sorted_files) != len(tx_sorted_files):
+        print(rx_frame_length,tx_frame_length)
+        raise ValueError("The number of files in RxFolder and TxFolder must be the same.")
+    if rx_center_freqs != tx_center_freqs or rx_frame_length != tx_frame_length:
+        print(rx_frame_length,tx_frame_length)
+        raise ValueError("The structure of RxFolder and TxFolder must match.")
+        
+    # 初始化存储信道响应的矩阵
+    total_frames = rx_frame_length * rx_frequency_frame_groups[0]
+    num_freq_bands = len(rx_center_freqs)
+    channel_response_matrix = np.zeros((total_frames, num_freq_bands, FFTLength), dtype=complex)
+
+    # 遍历每个中心频率和时间帧，计算信道响应
+    index = 0
+    total_files = len(rx_sorted_files)
+
+    time_axis = np.arange(1, total_frames + 1) * FFTLength / sampling_rate
+    freq_axis = np.linspace(-sampling_rate / 2, sampling_rate / 2, FFTLength, endpoint=False)
+    for k, center_freq in enumerate(rx_center_freqs):
+        for frame in range(rx_frame_length * rx_frequency_frame_groups[k]):
+            # 获取 Rx 和 Tx 对应的文件
+            rx_file_path = rx_sorted_files[frame]
+            tx_file_path = tx_sorted_files[frame]
+
+
+            # 读取 Rx 和 Tx 的 I/Q 数据
+            rx_I_data, rx_Q_data = read_bin_file(rx_file_path)
+            tx_I_data, tx_Q_data = read_bin_file(tx_file_path)
+            # 计算复数形式的 Rx 和 Tx 信号
+            rx_complex_signal = rx_I_data + 1j * rx_Q_data
+            tx_complex_signal = tx_I_data + 1j * tx_Q_data
+
+            # 进行 FFT 并应用校准
+            rx_fft_result = fftshift(fft(rx_complex_signal))
+            tx_fft_result = fftshift(fft(tx_complex_signal))
+
+            if DC_Calibration[k] != 0:
+                rx_fft_result[0] = rx_fft_result[0] - DC_Calibration[0]*FFTLength
+                tx_fft_result[0] = tx_fft_result[0] - DC_Calibration[1]*FFTLength
+
+            # 计算信道响应
+            channel_response = rx_fft_result / tx_fft_result
+            channel_response_matrix[frame, k, :] = channel_response
+
+        print(f"Frequency band {k + 1}/{num_freq_bands} processed ({index}/{total_files} files).")
+
+    # 构造时间轴和频率轴
+
+    print(f"All {total_files} frames processed for {num_freq_bands} frequency bands.")
+    # 根据校准生成文件名
+    base_folder_name = os.path.basename(os.path.dirname(RxFolder))
+    if avgminus==True:
+        avg_value = np.mean(channel_response_matrix)
+        print(avg_value)
+        channel_response_matrix -= avg_value
+    print("meanagain",np.mean(channel_response_matrix))
+
+    output_dir = 'picture/Channel/phase'
+    os.makedirs(output_dir, exist_ok=True)
+    if all(calib == 0 for calib in DC_Calibration):  # 无校准
+        file_suffix = ".png"
+    else:  # 有校准
+        file_suffix = "withDCcalibration.png"
+
+    output_file = os.path.join(output_dir, f"{base_folder_name}_channel_response{file_suffix}")
+
+    # 绘制绝对值信道响应
+    abs_channel_response = np.angle(channel_response_matrix)
+    plot_3d_angle(abs_channel_response, total_frames, time_axis, FFTLength, freq_axis[::-1], output_file)
+
+    output_dir = 'picture/Channel/Amp'
+    os.makedirs(output_dir, exist_ok=True)
+    if all(calib == 0 for calib in DC_Calibration):  # 无校准
+        file_suffix = ".png"
+    else:  # 有校准
+        file_suffix = "withDCcalibration.png"
+
+    output_file = os.path.join(output_dir, f"{base_folder_name}_channel_response{file_suffix}")
+
+    # 绘制绝对值信道响应
+    abs_channel_response = np.abs(channel_response_matrix)
+    plot_3d_amp(abs_channel_response, total_frames, time_axis, FFTLength, freq_axis[::-1], output_file)
+
+
+    return channel_response_matrix, freq_axis, time_axis
+
+
+def CompareChannelOld(Folder, DC_Calibration, sampling_rate, signalfilter=False,avgminus=False):
     """
     Compare the channel response by dividing the spectra from RxFolder and TxFolder.
 
@@ -1509,9 +1623,12 @@ def CompareChannel(Folder, DC_Calibration, sampling_rate, signalfilter=False,avg
     FFTLength = total_data_count // 2  # 每个时间帧的 FFT 长度
     # 确保 Rx 和 Tx 文件结构一致
     if len(rx_sorted_files) != len(tx_sorted_files):
+        print(rx_frame_length,tx_frame_length)
         raise ValueError("The number of files in RxFolder and TxFolder must be the same.")
     if rx_center_freqs != tx_center_freqs or rx_frame_length != tx_frame_length:
+        print(rx_frame_length,tx_frame_length)
         raise ValueError("The structure of RxFolder and TxFolder must match.")
+        
     # 初始化存储信道响应的矩阵
     total_frames = rx_frame_length * rx_frequency_frame_groups[0]
     num_freq_bands = len(rx_center_freqs)
@@ -2878,9 +2995,8 @@ def create_new_signal_Folder(Folder, firstframe, newfoldername):
     RxFolder = os.path.join(Folder, "Channel1")  # 人动的
     rx_sorted_files = process_files_fast(RxFolder)
     tx_sorted_files = process_files_fast(TxFolder)
-
+    residual_error = 0
     # 初始化
-    lengthRxnow = 0
     TxsaveCounter = 0
     RxsaveCounter = 0
     TotleSignallength = 15000  # 总信号长度动态更新
@@ -2905,7 +3021,7 @@ def create_new_signal_Folder(Folder, firstframe, newfoldername):
         rx_I_data, rx_Q_data = read_bin_file(rx_file_path)
         tx_I_data, tx_Q_data = read_bin_file(tx_file_path)
 
-        lengthRxnow += 512
+
 
         # 将 I 和 Q 数据转换为复数信号
         rx_complex_signal_frame = rx_I_data + 1j * rx_Q_data
@@ -2916,26 +3032,33 @@ def create_new_signal_Folder(Folder, firstframe, newfoldername):
         combined_signal_tx = np.concatenate((combined_signal_tx, tx_complex_signal_frame))
 
         # 如果总长度达到或超过 15000
-        if lengthRxnow >= TotleSignallength:
+        if len(combined_signal_rx) >= TotleSignallength:
+        # 动态调整 TotleSignallength
+            adjusted_length = round(14999.7367 + residual_error)
+            residual_error += 14999.7367 - adjusted_length  # 更新误差累积
+
             # 更新保存计数器
             RxsaveCounter += 1
             TxsaveCounter += 1
-            TotleSignallength = int(14999.7367 * RxsaveCounter)
 
             # 提取前 10240 个数据并保存
             rx_save = combined_signal_rx[:10240]
             tx_save = combined_signal_tx[:10240]
 
-            # 更新 combined_signal，移除前 TotleSignallength 个复数数据
-            combined_signal_rx = combined_signal_rx[TotleSignallength:]
-            combined_signal_tx = combined_signal_tx[TotleSignallength:]
+            # 检查保存数据长度是否正确
+            if len(rx_save) != 10240:
+                print(f"错误: rx_save 长度不正确，RxsaveCounter: {RxsaveCounter}")
+
+            # 更新 combined_signal，移除前 adjusted_length 个复数数据
+            combined_signal_rx = combined_signal_rx[adjusted_length:]
+            combined_signal_tx = combined_signal_tx[adjusted_length:]
 
             # 保存到新文件夹
             rx_save_file_name = os.path.join(
-                Rxfoldernewname, f"center900frame{RxsaveCounter}.bin"
+                Rxfoldernewname, f"center900frame{RxsaveCounter - 1}.bin"
             )
             tx_save_file_name = os.path.join(
-                Txfoldernewname, f"center900frame{TxsaveCounter}.bin"
+                Txfoldernewname, f"center900frame{TxsaveCounter - 1}.bin"
             )
 
             save_bin_file(rx_save_file_name, rx_save)
@@ -2999,26 +3122,29 @@ if __name__ == "__main__":
     folder_name = "./data/fastwalk2501Ghz/"
     arr = read_bin_to_array(folder_name)
     firstframe = returnfirstsignalframe(arr)
-    create_new_signal_Folder(folder_name,firstframe,newfoldername)
+    CompareChannel(newfoldername,[-0.492472 + -0.492484*1,-0.492472 + -0.492484*1], sampling_rate,avgminus=True)
+    #create_new_signal_Folder(folder_name,firstframe,newfoldername)
+
+
     #timedomainpic("./data/fourHumannoMove2501Ghz/Channel0/",31)
 
-    newfoldername = "./data/fourHumanSignal/"
-    folder_name = "./data/fourHumannoMove2501Ghz/"
-    arr = read_bin_to_array(folder_name)
-    firstframe = returnfirstsignalframe(arr)
-    create_new_signal_Folder(folder_name,firstframe,newfoldername)
+    # newfoldername = "./data/fourHumanSignal/"
+    # folder_name = "./data/fourHumannoMove2501Ghz/"
+    # arr = read_bin_to_array(folder_name)
+    # firstframe = returnfirstsignalframe(arr)
+    # create_new_signal_Folder(folder_name,firstframe,newfoldername)
 
-    newfoldername = "./data/handmovingSignal/"
-    folder_name = "./data/handmoving2501Ghz/"
-    arr = read_bin_to_array(folder_name)
-    firstframe = returnfirstsignalframe(arr)
-    create_new_signal_Folder(folder_name,firstframe,newfoldername)
+    # newfoldername = "./data/handmovingSignal/"
+    # folder_name = "./data/handmoving2501Ghz/"
+    # arr = read_bin_to_array(folder_name)
+    # firstframe = returnfirstsignalframe(arr)
+    # create_new_signal_Folder(folder_name,firstframe,newfoldername)
 
-    newfoldername = "./data/breathSignal/"
-    folder_name = "./data/breath2501Ghz/"
-    arr = read_bin_to_array(folder_name)
-    firstframe = returnfirstsignalframe(arr)
-    create_new_signal_Folder(folder_name,firstframe,newfoldername)
+    # newfoldername = "./data/breathSignal/"
+    # folder_name = "./data/breath2501Ghz/"
+    # arr = read_bin_to_array(folder_name)
+    # firstframe = returnfirstsignalframe(arr)
+    # create_new_signal_Folder(folder_name,firstframe,newfoldername)
 
     # folder_name = "./data/fourHumannoMove2501Ghz/"
     # #timedomainpic(folder_name,)
