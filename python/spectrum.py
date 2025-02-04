@@ -3479,7 +3479,7 @@ def save_bin_file(file_path, data):
     with open(file_path, "wb") as f:
         interleaved_data.tofile(f)
 
-def create_new_signal_Folder(Folder, firstframe, newfoldername):
+def create_new_signal_Folder(Folder, firstframe, newfoldername,firstjump = 0):
     # 设置路径
     TxFolder = os.path.join(Folder, "Channel0")  # 不变的
     RxFolder = os.path.join(Folder, "Channel1")  # 人动的
@@ -3510,8 +3510,6 @@ def create_new_signal_Folder(Folder, firstframe, newfoldername):
         # 读取当前帧的 I 和 Q 数据
         rx_I_data, rx_Q_data = read_bin_file(rx_file_path)
         tx_I_data, tx_Q_data = read_bin_file(tx_file_path)
-
-
 
         # 将 I 和 Q 数据转换为复数信号
         rx_complex_signal_frame = rx_I_data + 1j * rx_Q_data
@@ -3555,6 +3553,85 @@ def create_new_signal_Folder(Folder, firstframe, newfoldername):
             save_bin_file(tx_save_file_name, tx_save)
 
     print(f"数据处理完成，新文件已保存到文件夹: {newfoldername}")
+
+
+def create_new_signal_Folder_Big(Folder, firstframe, newfoldername, firstjump=0):
+    # 设置路径
+    TxFolder = os.path.join(Folder, "Channel0")  # 不变的
+    RxFolder = os.path.join(Folder, "Channel1")  # 人动的
+    rx_sorted_files = process_files_fast(RxFolder)
+    tx_sorted_files = process_files_fast(TxFolder)
+    residual_error = 0
+
+    # 初始化
+    TxsaveCounter = 0
+    RxsaveCounter = 0
+    TotleSignallength = 15000  # 总信号长度动态更新
+    combined_signal_rx = np.array([], dtype=np.complex64)
+    combined_signal_tx = np.array([], dtype=np.complex64)
+
+    # 创建输出文件夹
+    if not os.path.exists(newfoldername):
+        os.makedirs(newfoldername)
+
+    Rxfoldernewname = os.path.join(newfoldername, "Channel1")
+    Txfoldernewname = os.path.join(newfoldername, "Channel0")
+
+    if not os.path.exists(Rxfoldernewname):
+        os.makedirs(Rxfoldernewname)
+    if not os.path.exists(Txfoldernewname):
+        os.makedirs(Txfoldernewname)
+
+    # 遍历每个指定的帧号，拼接信号
+    for idx, (rx_file_path, tx_file_path) in enumerate(zip(rx_sorted_files[firstframe:], tx_sorted_files[firstframe:])):
+        # 读取当前帧的 I 和 Q 数据
+        rx_I_data, rx_Q_data = read_bin_file(rx_file_path)
+        tx_I_data, tx_Q_data = read_bin_file(tx_file_path)
+
+        # 将 I 和 Q 数据转换为复数信号
+        rx_complex_signal_frame = rx_I_data + 1j * rx_Q_data
+        tx_complex_signal_frame = tx_I_data + 1j * tx_Q_data
+
+        # **对于 firstframe，跳过 firstjump 之前的数据**
+        if idx == 0:  
+            rx_complex_signal_frame = rx_complex_signal_frame[firstjump:]
+            tx_complex_signal_frame = tx_complex_signal_frame[firstjump:]
+
+        # 拼接当前帧信号到总信号
+        combined_signal_rx = np.concatenate((combined_signal_rx, rx_complex_signal_frame))
+        combined_signal_tx = np.concatenate((combined_signal_tx, tx_complex_signal_frame))
+
+        # **如果长度大于等于 15000，循环去掉前面的数据直到长度小于 15000**
+        while len(combined_signal_rx) >= TotleSignallength:
+            # 动态调整 TotleSignallength
+            adjusted_length = round(14999.7367 + residual_error)
+            residual_error += 14999.7367 - adjusted_length  # 更新误差累积
+
+            # 更新保存计数器
+            RxsaveCounter += 1
+            TxsaveCounter += 1
+
+            # 提取前 10240 个数据并保存
+            rx_save = combined_signal_rx[:10240]
+            tx_save = combined_signal_tx[:10240]
+
+            # **检查保存数据长度是否正确**
+            if len(rx_save) != 10240:
+                print(f"错误: rx_save 长度不正确，RxsaveCounter: {RxsaveCounter}")
+
+            # **循环去掉 adjusted_length 直到长度小于 15000**
+            combined_signal_rx = combined_signal_rx[adjusted_length:]
+            combined_signal_tx = combined_signal_tx[adjusted_length:]
+
+            # 保存到新文件夹
+            rx_save_file_name = os.path.join(Rxfoldernewname, f"center900frame{RxsaveCounter - 1}.bin")
+            tx_save_file_name = os.path.join(Txfoldernewname, f"center900frame{TxsaveCounter - 1}.bin")
+
+            save_bin_file(rx_save_file_name, rx_save)
+            save_bin_file(tx_save_file_name, tx_save)
+
+    print(f"数据处理完成，新文件已保存到文件夹: {newfoldername}")
+
 
 def H_T(Folder, frame):
     TxFolder = os.path.join(Folder, "Channel0")  # 发射信号目录
@@ -3757,6 +3834,34 @@ def plot2d(matrix):
     ax.set_title("2D Matrix Shape Visualization")
 
     plt.show()
+
+#Signal detect forder preprocess code
+#--------------------------------------------------------
+#See Energy
+
+#------------------Short frame Signal------------------
+#Complexdata = combine_selected_signals("./data/fastwalkSignal/Channel0",[0,1])
+#Start_point = 0
+#Start_diff = 20
+#sampling_rate = 15e6
+#resolution = 500
+#Complexdata = Complexdata[:100000]
+#STFT(Complexdata, Start_point, Start_diff, len(Complexdata), sampling_rate, resolution)
+#create_new_signal_Folder(Folder, firstframe, newfoldername, firstjump=0)
+
+
+#------------------Big frame Signal------------------
+#Complexdata = combine_selected_signals("./data/fastwalkSignal/Channel0",[0])
+#arr = list(range(11))
+#Complexdata = Complexdata[:100000]
+#Start_point = 0
+#Start_diff = 20
+#sampling_rate = 15e6
+#resolution = 500
+#Complexdata = Complexdata[:100000]
+#STFT(Complexdata, Start_point, Start_diff, len(Complexdata), sampling_rate, resolution)
+
+#create_new_signal_Folder_Big(Folder, firstframe, newfoldername, firstjump=0)
 
 if __name__ == "__main__":
     # 参数设置
